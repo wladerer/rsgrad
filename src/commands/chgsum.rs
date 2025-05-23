@@ -1,7 +1,9 @@
 use std::path::PathBuf;
+
+use anyhow::{Context, Result};
 use clap::Args;
 use log::info;
-use anyhow::{Context, Result};
+use rayon::prelude::*;
 
 use crate::{
     ChargeDensity,
@@ -10,45 +12,45 @@ use crate::{
 };
 
 #[derive(Debug, Args)]
-/// Sum multiple CHGCAR charge densities: CHG_SUM = CHG1 + CHG2 + ...
-pub struct ChgSum {
-    /// Input CHGCAR files
+/// Sum multiple CHGCAR files to generate a combined charge density.
+/// The operation is: `chgcar_sum = chgcar_1 + chgcar_2 + ... + chgcar_n`
+pub struct Chgsum {
+    /// The input CHGCAR files
     #[arg(required = true)]
     input: Vec<PathBuf>,
 
-    #[arg(short, long, default_value = "CHG_SUM.vasp")]
+    /// The output CHGCAR file path
+    #[arg(short, long, default_value = "CHGSUM.vasp")]
     output: PathBuf,
 }
 
-impl OptProcess for ChgSum {
+impl OptProcess for Chgsum {
     fn process(&self) -> Result<()> {
-        use rayon::prelude::*;
-
         if self.input.is_empty() {
-            anyhow::bail!("At least one CHGCAR file is required.");
+            anyhow::bail!("No CHGCAR files provided for summation.");
         }
 
-        let mut chg_list: Vec<anyhow::Result<ChargeDensity>> =
-            vec![Err(anyhow::anyhow!("placeholder")); self.input.len()];
+        info!("Reading {} charge densities in parallel...", self.input.len());
 
-        rayon::scope(|s| {
-            for (i, path) in self.input.iter().enumerate() {
-                s.spawn(|_| {
-                    chg_list[i] = ChargeDensity::from_file(path, ChargeType::Chgcar)
-                        .with_context(|| format!("Failed to load CHGCAR from {:?}", path));
-                });
-            }
-        });
+        let charges: Vec<ChargeDensity> = self
+            .input
+            .par_iter()
+            .map(|path| {
+                ChargeDensity::from_file(path, ChargeType::Chgcar)
+                    .with_context(|| format!("Failed to read CHGCAR from {:?}", path))
+            })
+            .collect::<Result<_>>()?;
 
-        let mut chg_list = chg_list.into_iter().collect::<Result<Vec<_>>>()?;
+        info!("Successfully read all CHGCAR files. Summing...");
 
-        let mut total = chg_list.pop().context("No CHGCAR files successfully loaded.")?;
-        for chg in chg_list {
-            total = (total + chg)?;
+        // Reduce the vector with addition
+        let mut chg_sum = charges[0].clone();
+        for chg in &charges[1..] {
+            chg_sum = (chg_sum.clone() + chg.clone())?;
         }
 
-        info!("Writing summed charge density to {:?}", self.output);
-        total.to_file(&self.output)?;
+        info!("Writing combined charge density to {:?}", self.output);
+        chg_sum.to_file(&self.output)?;
 
         Ok(())
     }
