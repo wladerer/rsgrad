@@ -18,6 +18,7 @@ use crate::{
         pos::Pos,
         pot::Pot,
         chgdiff::Chgdiff,
+        chgsum::ChgSum,
         workfunc::Workfunc,
         dos::Dos,
         band::Band,
@@ -72,6 +73,8 @@ enum Opt {
     Pot,
 
     Chgdiff,
+
+    ChgSum,
 
     Workfunc,
 
